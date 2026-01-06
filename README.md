@@ -1,4 +1,4 @@
-```markdown
+
 # 🏭 Mining Production Efficiency Dashboard
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
