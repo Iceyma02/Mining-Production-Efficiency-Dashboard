@@ -291,6 +291,6 @@ Made with ❤️ for the mining industry
 [💡 Request Feature](https://github.com/yourusername/mining-production-dashboard/issues)
 
 </div>
-```
+
 
 
