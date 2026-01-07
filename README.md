@@ -48,7 +48,7 @@ A comprehensive, interactive dashboard for monitoring and optimizing mining prod
 
 ## 🚀 Live Demo
 
-Try the dashboard online: [Mining Dashboard Demo](https://mining-dashboard.streamlit.app/) *(Coming Soon)*
+Try the dashboard online: [Mining Dashboard Demo](https://tbzampbika8tfdb7ut3jdr.streamlit.app/)
 
 ## 🛠️ Installation
 
