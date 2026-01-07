@@ -122,8 +122,7 @@ mining-production-dashboard/
 │   ├── equipment-monitoring.png
 │   └── oee-analysis.png
 └── docs/                   # Additional documentation
-    ├── installation.md
-    └── api_reference.md
+     └──installation.md 
 ```
 
 ## 📊 Key Metrics
