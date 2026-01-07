@@ -60,8 +60,8 @@ Try the dashboard online: [Mining Dashboard Demo](https://mining-dashboard.strea
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/mining-production-dashboard.git
-cd mining-production-dashboard
+git clone https://github.com/Iceyma02/Mining-Production-Efficiency-Dashboard.git
+cd Mining-Production-Efficiency-Dashboard
 ```
 
 2. **Create virtual environment**
@@ -115,7 +115,7 @@ mining-production-dashboard/
 ├── app.py                    # Main Streamlit application
 ├── requirements.txt          # Python dependencies
 ├── README.md                # Project documentation
-├── LICENSE                  # MIT License
+├── LICENSE                  #  License
 ├── .gitignore              # Git ignore file
 ├── assets/                 # Images and screenshots
 │   ├── dashboard-preview.png
@@ -218,7 +218,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 ### **Development Setup**
 ```bash
 # Fork and clone the repository
-git clone https://github.com/yourusername/mining-production-dashboard.git
+git clone https://github.com/Iceyma02/Mining-Production-Efficiency-Dashboard.git
 
 # Create feature branch
 git checkout -b feature/amazing-feature
