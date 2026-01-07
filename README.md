@@ -264,11 +264,11 @@ must be given** to the original author.
 
 ## 📞 Contact
 
-**Your Name** - [@yourtwitter](https://twitter.com/yourtwitter) - email@example.com
+**Email** - manjengwap10@gmail.com
 
-**Project Link**: [https://github.com/yourusername/mining-production-dashboard](https://github.com/yourusername/mining-production-dashboard)
+**Project Link**: [https://github.com/Iceyma02/Mining-Production-Efficiency-Dashboard]([https://github.com/Iceyma02/Mining-Production-Efficiency-Dashboard)
 
-**LinkedIn**: [Your Profile](https://linkedin.com/in/yourprofile)
+**LinkedIn**: [Your Profile](https://www.linkedin.com/in/anesu-manjengwa-684766247)
 
 ---
 
@@ -286,9 +286,9 @@ must be given** to the original author.
   
 Made with ❤️ for the mining industry
 
-[⭐ Star this repo](https://github.com/yourusername/mining-production-dashboard/stargazers) |
-[🐛 Report Bug](https://github.com/yourusername/mining-production-dashboard/issues) |
-[💡 Request Feature](https://github.com/yourusername/mining-production-dashboard/issues)
+[⭐ Star this repo](https://github.com/Iceyma02/Mining-Production-Efficiency-Dashboard/stargazers)
+[🐛 Report Bug](https://github.com/Iceyma02/Mining-Production-Efficieny-Dashboard/issues)
+[💡 Request Feature](https://github.com/Iceyma02/Mining-Production-Efficieny-Dashboard/issues)
 
 </div>
 
