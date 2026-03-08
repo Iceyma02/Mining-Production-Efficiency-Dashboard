@@ -14,17 +14,10 @@ import random
 import io
 import tempfile
 import os
-import subprocess
-import sys
 
 # ============================================================================
-# INSTALL MISSING DEPENDENCIES AUTOMATICALLY
+# CHECK FOR REPORTLAB (BUT DON'T AUTO-INSTALL)
 # ============================================================================
-def install_package(package):
-    """Install missing package"""
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# Check and install reportlab if needed
 try:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter, landscape
@@ -33,13 +26,7 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-    st.warning("⚠️ PDF generation requires reportlab. Installing now...")
-    install_package("reportlab")
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    REPORTLAB_AVAILABLE = True
+    st.warning("⚠️ PDF generation requires reportlab. Install it locally with: pip install reportlab")
 
 # ============================================================================
 # CONFIGURATION
@@ -79,13 +66,17 @@ def format_downtime_context(hours):
             return f"{weeks:.0f} weeks ({hours:.0f} hours)"
 
 # ============================================================================
-# PDF REPORT GENERATION
+# PDF REPORT GENERATION (ONLY IF REPORTLAB IS AVAILABLE)
 # ============================================================================
 def generate_pdf_report(production_df, equipment_df, downtime_df, oee, utilization, 
                         total_production, cost_per_ton, date_range):
     """
     Generate a professional PDF report with all dashboard data
     """
+    if not REPORTLAB_AVAILABLE:
+        st.error("PDF generation requires reportlab. Install it with: pip install reportlab")
+        return None
+        
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
         pdf_path = tmp_file.name
@@ -884,35 +875,40 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # FIXED: Actually generate PDF report with proper error handling
-        if st.button("📄 Generate PDF Report", use_container_width=True):
-            with st.spinner("Generating PDF report..."):
-                try:
-                    pdf_data = generate_pdf_report(
-                        prod_filtered, 
-                        equip_filtered, 
-                        downtime_filtered, 
-                        oee, 
-                        utilization, 
-                        total_production, 
-                        cost_per_ton, 
-                        date_range
-                    )
-                    
-                    st.download_button(
-                        label="📥 Download PDF Report",
-                        data=pdf_data,
-                        file_name=f"mining_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-                    st.success("✅ PDF Report generated successfully! Click the download button above.")
-                except Exception as e:
-                    st.error(f"Error generating PDF: {str(e)}")
-                    st.info("Try installing reportlab: pip install reportlab")
+        # PDF Report - Only if reportlab is available
+        if REPORTLAB_AVAILABLE:
+            if st.button("📄 Generate PDF Report", use_container_width=True):
+                with st.spinner("Generating PDF report..."):
+                    try:
+                        pdf_data = generate_pdf_report(
+                            prod_filtered, 
+                            equip_filtered, 
+                            downtime_filtered, 
+                            oee, 
+                            utilization, 
+                            total_production, 
+                            cost_per_ton, 
+                            date_range
+                        )
+                        
+                        if pdf_data:
+                            st.download_button(
+                                label="📥 Download PDF Report",
+                                data=pdf_data,
+                                file_name=f"mining_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                            st.success("✅ PDF Report generated successfully!")
+                    except Exception as e:
+                        st.error(f"Error generating PDF: {str(e)}")
+        else:
+            st.info("📄 PDF generation requires reportlab. Install locally with: pip install reportlab")
+            if st.button("📄 PDF Report (Unavailable)", disabled=True, use_container_width=True):
+                pass
     
     with col2:
-        # Excel Export - Fixed with better formatting
+        # Excel Export - Always works
         if st.button("📊 Generate Excel Report", use_container_width=True):
             with st.spinner("Generating Excel report..."):
                 try:
@@ -978,7 +974,7 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
-                    st.success("✅ Excel Report generated successfully! Click the download button above.")
+                    st.success("✅ Excel Report generated successfully!")
                 except Exception as e:
                     st.error(f"Error generating Excel: {str(e)}")
     
@@ -997,7 +993,6 @@ def main():
         <p>Version {APP_VERSION} | Data Period: {date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}</p>
         <p>Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         <p>Total Downtime: {format_downtime_context(total_downtime_hours)}</p>
-        <p>📥 To generate PDF: Click "Generate PDF Report" → Then click "Download PDF Report"</p>
     </div>
     """, unsafe_allow_html=True)
 
