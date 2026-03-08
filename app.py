@@ -12,13 +12,34 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import random
 import io
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
 import tempfile
 import os
+import subprocess
+import sys
+
+# ============================================================================
+# INSTALL MISSING DEPENDENCIES AUTOMATICALLY
+# ============================================================================
+def install_package(package):
+    """Install missing package"""
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# Check and install reportlab if needed
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    st.warning("⚠️ PDF generation requires reportlab. Installing now...")
+    install_package("reportlab")
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    REPORTLAB_AVAILABLE = True
 
 # ============================================================================
 # CONFIGURATION
@@ -53,28 +74,9 @@ def format_downtime_context(hours):
         weeks = hours / 168
         days = (hours % 168) / 24
         if days > 0:
-            return f"{weeks:.0f} weeks, {days:.0f} days"
+            return f"{weeks:.0f} weeks, {days:.0f} days ({hours:.0f} hours)"
         else:
-            return f"{weeks:.0f} weeks"
-
-def get_downtime_tooltip(row):
-    """Generate rich tooltip for downtime hover"""
-    hours = row['duration_hours']
-    days = hours / 24
-    shifts = hours / 8
-    cost = row.get('cost_usd', 0)
-    
-    tooltip = f"<b>{row['downtime_type']}</b><br>"
-    tooltip += f"• Duration: {format_downtime_context(hours)}<br>"
-    tooltip += f"• Hours: {hours:,.0f}<br>"
-    tooltip += f"• Days: {days:.1f}<br>"
-    tooltip += f"• Shifts: {shifts:.0f}<br>"
-    tooltip += f"• Events: {row.get('event_count', 1)}<br>"
-    if cost > 0:
-        tooltip += f"• Cost: ${cost:,.0f}<br>"
-        if hours > 0:
-            tooltip += f"• Cost/Hour: ${cost/hours:,.0f}"
-    return tooltip
+            return f"{weeks:.0f} weeks ({hours:.0f} hours)"
 
 # ============================================================================
 # PDF REPORT GENERATION
@@ -111,18 +113,17 @@ def generate_pdf_report(production_df, equipment_df, downtime_df, oee, utilizati
     story.append(Paragraph("Executive Summary", styles['Heading2']))
     story.append(Spacer(1, 10))
     
+    # Calculate total downtime hours
+    total_downtime_hours = downtime_df['duration_minutes'].sum() / 60 if not downtime_df.empty else 0
+    
     metrics_data = [
         ['Metric', 'Value'],
         ['Overall Equipment Effectiveness (OEE)', f"{oee}%"],
         ['Total Production', f"{total_production:,.0f} tons"],
         ['Equipment Utilization', f"{utilization}%"],
         ['Cost per Ton', f"${cost_per_ton}"],
+        ['Total Downtime', format_downtime_context(total_downtime_hours)],
     ]
-    
-    # Add downtime total if available
-    if not downtime_df.empty:
-        total_downtime_hours = downtime_df['duration_minutes'].sum() / 60
-        metrics_data.append(['Total Downtime', format_downtime_context(total_downtime_hours)])
     
     metrics_table = Table(metrics_data, colWidths=[200, 200])
     metrics_table.setStyle(TableStyle([
@@ -613,7 +614,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
     
     # ============================================================================
-    # FIXED DOWNTIME ANALYSIS - WITH HOURS AND DAYS
+    # FIXED DOWNTIME ANALYSIS - WITH HOURS AND DAYS ON HOVER
     # ============================================================================
     st.markdown('<div class="section-header">🔧 Downtime Analysis</div>', unsafe_allow_html=True)
 
@@ -621,7 +622,7 @@ def main():
 
     with col1:
         if not downtime_filtered.empty:
-            # Convert minutes to hours (THIS IS THE KEY FIX!)
+            # Convert minutes to hours (KEY FIX)
             downtime_filtered['duration_hours'] = downtime_filtered['duration_minutes'] / 60
             
             # Aggregate by downtime type
@@ -639,14 +640,31 @@ def main():
             downtime_by_type['duration_days'] = downtime_by_type['duration_hours'] / 24
             downtime_by_type['duration_shifts'] = downtime_by_type['duration_hours'] / 8
             
-            # Create custom hover text showing hours AND days
+            # Create bar chart with HOURS on y-axis
+            fig_downtime = go.Figure()
+            
+            # Create hover text for each bar
             hover_texts = []
             for _, row in downtime_by_type.iterrows():
-                hover_text = get_downtime_tooltip(row)
+                hours = row['duration_hours']
+                days = hours / 24
+                shifts = hours / 8
+                cost = row.get('cost_usd', 0)
+                
+                hover_text = (
+                    f"<b>{row['downtime_type']}</b><br>"
+                    f"• Duration: {format_downtime_context(hours)}<br>"
+                    f"• Hours: {hours:,.0f}<br>"
+                    f"• Days: {days:.1f}<br>"
+                    f"• Shifts: {shifts:.0f}<br>"
+                    f"• Events: {row['event_count']}<br>"
+                )
+                if cost > 0:
+                    hover_text += f"• Cost: ${cost:,.0f}<br>"
+                    if hours > 0:
+                        hover_text += f"• Cost/Hour: ${cost/hours:,.0f}"
+                
                 hover_texts.append(hover_text)
-            
-            # Create bar chart with HOURS on y-axis (NOT MINUTES)
-            fig_downtime = go.Figure()
             
             fig_downtime.add_trace(go.Bar(
                 x=downtime_by_type['downtime_type'],
@@ -669,7 +687,7 @@ def main():
             fig_downtime.update_layout(
                 title=f"⏱️ Downtime by Category - Total: {format_downtime_context(total_hours)}",
                 xaxis_title="Downtime Type",
-                yaxis_title="Duration (Hours)",
+                yaxis_title="Duration (Hours)",  # Changed from Minutes to Hours
                 height=450,
                 template="plotly_dark",
                 showlegend=False
@@ -866,7 +884,7 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # FIXED: Actually generate PDF report
+        # FIXED: Actually generate PDF report with proper error handling
         if st.button("📄 Generate PDF Report", use_container_width=True):
             with st.spinner("Generating PDF report..."):
                 try:
@@ -888,9 +906,10 @@ def main():
                         mime="application/pdf",
                         use_container_width=True
                     )
-                    st.success("PDF Report generated successfully!")
+                    st.success("✅ PDF Report generated successfully! Click the download button above.")
                 except Exception as e:
                     st.error(f"Error generating PDF: {str(e)}")
+                    st.info("Try installing reportlab: pip install reportlab")
     
     with col2:
         # Excel Export - Fixed with better formatting
@@ -909,6 +928,8 @@ def main():
                         downtime_export = downtime_filtered.copy()
                         if 'duration_hours' not in downtime_export.columns:
                             downtime_export['duration_hours'] = downtime_export['duration_minutes'] / 60
+                        downtime_export['duration_days'] = downtime_export['duration_hours'] / 24
+                        downtime_export['duration_formatted'] = downtime_export['duration_hours'].apply(format_downtime_context)
                         downtime_export.to_excel(writer, sheet_name='Downtime', index=False)
                         
                         # Summary sheet
@@ -919,6 +940,8 @@ def main():
                                 'Equipment Utilization (%)', 
                                 'Cost per Ton ($)',
                                 'Total Downtime',
+                                'Total Downtime Hours',
+                                'Total Downtime Days',
                                 'Report Generated'
                             ],
                             'Value': [
@@ -926,7 +949,9 @@ def main():
                                 f"{total_production:,.0f}",
                                 f"{utilization}",
                                 f"{cost_per_ton}",
-                                format_downtime_context(downtime_filtered['duration_hours'].sum()),
+                                format_downtime_context(downtime_filtered['duration_hours'].sum()) if not downtime_filtered.empty else "N/A",
+                                f"{downtime_filtered['duration_hours'].sum():,.0f}" if not downtime_filtered.empty else "N/A",
+                                f"{downtime_filtered['duration_hours'].sum()/24:.1f}" if not downtime_filtered.empty else "N/A",
                                 datetime.now().strftime('%Y-%m-%d %H:%M')
                             ]
                         }
@@ -940,7 +965,10 @@ def main():
                                 'duration_minutes': 'count'
                             }).reset_index()
                             downtime_summary.rename(columns={'duration_minutes': 'event_count'}, inplace=True)
+                            downtime_summary['duration_days'] = downtime_summary['duration_hours'] / 24
+                            downtime_summary['duration_shifts'] = downtime_summary['duration_hours'] / 8
                             downtime_summary['duration_formatted'] = downtime_summary['duration_hours'].apply(format_downtime_context)
+                            downtime_summary['cost_thousands'] = downtime_summary['cost_usd'] / 1000
                             downtime_summary.to_excel(writer, sheet_name='Downtime_Summary', index=False)
                     
                     st.download_button(
@@ -950,7 +978,7 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
-                    st.success("Excel Report generated successfully!")
+                    st.success("✅ Excel Report generated successfully! Click the download button above.")
                 except Exception as e:
                     st.error(f"Error generating Excel: {str(e)}")
     
@@ -969,6 +997,7 @@ def main():
         <p>Version {APP_VERSION} | Data Period: {date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}</p>
         <p>Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         <p>Total Downtime: {format_downtime_context(total_downtime_hours)}</p>
+        <p>📥 To generate PDF: Click "Generate PDF Report" → Then click "Download PDF Report"</p>
     </div>
     """, unsafe_allow_html=True)
 
