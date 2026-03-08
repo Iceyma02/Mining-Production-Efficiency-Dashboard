@@ -1,6 +1,7 @@
 """
 Mining Production Efficiency Dashboard
-A comprehensive dashboard for monitoring mining operations performance.
+Copyright 2026 Icey M A
+Licensed under Apache License 2.0
 """
 
 import streamlit as st
@@ -11,7 +12,13 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import random
 import io
-from plotly.subplots import make_subplots
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+import tempfile
+import os
 
 # ============================================================================
 # CONFIGURATION
@@ -19,6 +26,209 @@ from plotly.subplots import make_subplots
 APP_VERSION = "2.0.0"
 APP_NAME = "Mining Production Efficiency Dashboard"
 COMPANY_NAME = "Global Mining Corporation"
+
+# ============================================================================
+# SMART DOWNTIME FORMATTING FUNCTIONS
+# ============================================================================
+def format_downtime_context(hours):
+    """
+    Format downtime in the most readable way for mining operations
+    Shows minutes, hours, or days based on duration
+    """
+    if hours < 1:
+        minutes = hours * 60
+        return f"{minutes:.0f} minutes"
+    elif hours < 24:
+        shifts = hours / 8
+        return f"{hours:.1f} hours ({shifts:.1f} shifts)"
+    elif hours < 48:
+        days = hours / 24
+        shifts = hours / 8
+        return f"{days:.1f} days ({hours:.0f} hours, {shifts:.0f} shifts)"
+    elif hours < 168:  # Less than 1 week
+        days = hours / 24
+        shifts = hours / 8
+        return f"{days:.0f} days ({shifts:.0f} shifts)"
+    else:
+        weeks = hours / 168
+        days = (hours % 168) / 24
+        if days > 0:
+            return f"{weeks:.0f} weeks, {days:.0f} days"
+        else:
+            return f"{weeks:.0f} weeks"
+
+def get_downtime_tooltip(row):
+    """Generate rich tooltip for downtime hover"""
+    hours = row['duration_hours']
+    days = hours / 24
+    shifts = hours / 8
+    cost = row.get('cost_usd', 0)
+    
+    tooltip = f"<b>{row['downtime_type']}</b><br>"
+    tooltip += f"• Duration: {format_downtime_context(hours)}<br>"
+    tooltip += f"• Hours: {hours:,.0f}<br>"
+    tooltip += f"• Days: {days:.1f}<br>"
+    tooltip += f"• Shifts: {shifts:.0f}<br>"
+    tooltip += f"• Events: {row.get('event_count', 1)}<br>"
+    if cost > 0:
+        tooltip += f"• Cost: ${cost:,.0f}<br>"
+        if hours > 0:
+            tooltip += f"• Cost/Hour: ${cost/hours:,.0f}"
+    return tooltip
+
+# ============================================================================
+# PDF REPORT GENERATION
+# ============================================================================
+def generate_pdf_report(production_df, equipment_df, downtime_df, oee, utilization, 
+                        total_production, cost_per_ton, date_range):
+    """
+    Generate a professional PDF report with all dashboard data
+    """
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+        pdf_path = tmp_file.name
+    
+    # Create the PDF document
+    doc = SimpleDocTemplate(pdf_path, pagesize=landscape(letter))
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#FF6B00'),
+        alignment=1,  # Center alignment
+        spaceAfter=30
+    )
+    story.append(Paragraph(f"Mining Production Efficiency Report", title_style))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    story.append(Paragraph(f"Period: {date_range[0]} to {date_range[1]}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Key Metrics Section
+    story.append(Paragraph("Executive Summary", styles['Heading2']))
+    story.append(Spacer(1, 10))
+    
+    metrics_data = [
+        ['Metric', 'Value'],
+        ['Overall Equipment Effectiveness (OEE)', f"{oee}%"],
+        ['Total Production', f"{total_production:,.0f} tons"],
+        ['Equipment Utilization', f"{utilization}%"],
+        ['Cost per Ton', f"${cost_per_ton}"],
+    ]
+    
+    # Add downtime total if available
+    if not downtime_df.empty:
+        total_downtime_hours = downtime_df['duration_minutes'].sum() / 60
+        metrics_data.append(['Total Downtime', format_downtime_context(total_downtime_hours)])
+    
+    metrics_table = Table(metrics_data, colWidths=[200, 200])
+    metrics_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF6B00')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F0F0F0')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(metrics_table)
+    story.append(Spacer(1, 20))
+    
+    # Production Summary
+    if not production_df.empty:
+        story.append(Paragraph("Production Summary", styles['Heading2']))
+        story.append(Spacer(1, 10))
+        
+        # Production by material
+        material_summary = production_df.groupby('material_type')['quantity'].sum().reset_index()
+        material_summary['quantity'] = material_summary['quantity'].round(0)
+        
+        material_data = [['Material', 'Tons Produced']]
+        for _, row in material_summary.iterrows():
+            material_data.append([row['material_type'], f"{row['quantity']:,.0f}"])
+        
+        material_table = Table(material_data, colWidths=[150, 150])
+        material_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A90E2')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(material_table)
+        story.append(Spacer(1, 20))
+    
+    # Downtime Analysis
+    if not downtime_df.empty:
+        story.append(Paragraph("Downtime Analysis", styles['Heading2']))
+        story.append(Spacer(1, 10))
+        
+        # Convert minutes to hours for report
+        downtime_copy = downtime_df.copy()
+        downtime_copy['duration_hours'] = downtime_copy['duration_minutes'] / 60
+        downtime_summary = downtime_copy.groupby('downtime_type').agg({
+            'duration_hours': 'sum',
+            'cost_usd': 'sum',
+            'duration_minutes': 'count'
+        }).reset_index()
+        downtime_summary.rename(columns={'duration_minutes': 'event_count'}, inplace=True)
+        downtime_summary = downtime_summary.sort_values('duration_hours', ascending=False)
+        
+        downtime_data = [['Downtime Type', 'Duration', 'Events', 'Cost']]
+        for _, row in downtime_summary.iterrows():
+            downtime_data.append([
+                row['downtime_type'],
+                format_downtime_context(row['duration_hours']),
+                str(int(row['event_count'])),
+                f"${row['cost_usd']:,.0f}"
+            ])
+        
+        downtime_table = Table(downtime_data, colWidths=[120, 150, 80, 120])
+        downtime_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E53E3E')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(downtime_table)
+        story.append(Spacer(1, 20))
+    
+    # Equipment Status
+    if not equipment_df.empty:
+        story.append(Paragraph("Equipment Status", styles['Heading2']))
+        story.append(Spacer(1, 10))
+        
+        status_counts = equipment_df['status'].value_counts()
+        status_data = [['Status', 'Count']]
+        for status, count in status_counts.items():
+            status_data.append([status, str(count)])
+        
+        status_table = Table(status_data, colWidths=[150, 150])
+        status_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#38A169')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(status_table)
+    
+    # Build PDF
+    doc.build(story)
+    
+    # Read the PDF file
+    with open(pdf_path, 'rb') as f:
+        pdf_data = f.read()
+    
+    # Clean up temp file
+    os.unlink(pdf_path)
+    
+    return pdf_data
 
 # ============================================================================
 # DATA GENERATION - REALISTIC MINING DATA
@@ -115,19 +325,25 @@ def generate_mining_dataset():
     
     df_production = pd.DataFrame(production_logs)
     
-    # Generate downtime data
+    # Generate downtime data with realistic durations (some >24 hours)
     downtime_events = []
     for _, eq in df_equipment.iterrows():
-        # Major downtimes
+        # Major downtimes (longer events - some over 24 hours)
         for _ in range(random.randint(3, 6)):
             downtime_date = start_date + timedelta(days=random.randint(0, 364))
+            # Make some events very long (over 24 hours)
+            if random.random() < 0.3:  # 30% chance of major event
+                duration_minutes = random.randint(1440, 7200)  # 1-5 days
+            else:
+                duration_minutes = random.randint(120, 1440)  # 2-24 hours
+                
             downtime_events.append({
                 'equipment_id': eq['equipment_id'],
                 'start_time': downtime_date.replace(hour=random.randint(0, 23)),
-                'duration_minutes': random.randint(120, 1440),
+                'duration_minutes': duration_minutes,
                 'downtime_type': random.choice(['Mechanical', 'Electrical', 'Hydraulic']),
                 'reason': random.choice(['Component Failure', 'System Overload', 'Wear & Tear']),
-                'cost_usd': random.randint(5000, 25000)
+                'cost_usd': random.randint(5000, 50000)
             })
         
         # Minor downtimes
@@ -139,7 +355,7 @@ def generate_mining_dataset():
                 'duration_minutes': random.randint(30, 180),
                 'downtime_type': random.choice(['Operational', 'Weather', 'Supply Delay']),
                 'reason': random.choice(['Operator Error', 'Weather Conditions', 'Waiting for Parts']),
-                'cost_usd': random.randint(100, 1000)
+                'cost_usd': random.randint(100, 5000)
             })
     
     df_downtime = pd.DataFrame(downtime_events)
@@ -191,7 +407,7 @@ def calculate_cost_metrics(production_df, downtime_df):
     total_cost = downtime_cost + operational_cost
     cost_per_ton = total_cost / total_production if total_production > 0 else 0
     
-    return round(cost_per_ton, 2), round(total_cost / 1000, 1)  # Return cost/ton and total cost in thousands
+    return round(cost_per_ton, 2), round(total_cost / 1000, 1)
 
 # ============================================================================
 # MAIN APPLICATION
@@ -314,7 +530,6 @@ def main():
     total_production = prod_filtered['quantity'].sum()
     avg_daily = total_production / max(1, prod_filtered['date'].nunique())
     cost_per_ton, total_cost_k = calculate_cost_metrics(prod_filtered, downtime_filtered)
-    total_downtime_hr = downtime_filtered['duration_minutes'].sum() / 60
     
     # Key Metrics Display
     st.markdown('<div class="section-header">📊 Executive Dashboard</div>', unsafe_allow_html=True)
@@ -397,43 +612,253 @@ def main():
         fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
     
-    # Downtime Analysis
+    # ============================================================================
+    # FIXED DOWNTIME ANALYSIS - WITH HOURS AND DAYS
+    # ============================================================================
     st.markdown('<div class="section-header">🔧 Downtime Analysis</div>', unsafe_allow_html=True)
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if not downtime_filtered.empty:
-            downtime_by_type = downtime_filtered.groupby('downtime_type')['duration_minutes'].sum().reset_index()
-            fig = px.bar(downtime_by_type, x='downtime_type', y='duration_minutes',
-                         title='Downtime by Category (Minutes)')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-    
+            # Convert minutes to hours (THIS IS THE KEY FIX!)
+            downtime_filtered['duration_hours'] = downtime_filtered['duration_minutes'] / 60
+            
+            # Aggregate by downtime type
+            downtime_by_type = downtime_filtered.groupby('downtime_type').agg({
+                'duration_hours': 'sum',
+                'duration_minutes': 'count',  # Count of events
+                'cost_usd': 'sum'
+            }).reset_index()
+            downtime_by_type.rename(columns={'duration_minutes': 'event_count'}, inplace=True)
+            
+            # Sort by duration
+            downtime_by_type = downtime_by_type.sort_values('duration_hours', ascending=False)
+            
+            # Calculate additional metrics for tooltips
+            downtime_by_type['duration_days'] = downtime_by_type['duration_hours'] / 24
+            downtime_by_type['duration_shifts'] = downtime_by_type['duration_hours'] / 8
+            
+            # Create custom hover text showing hours AND days
+            hover_texts = []
+            for _, row in downtime_by_type.iterrows():
+                hover_text = get_downtime_tooltip(row)
+                hover_texts.append(hover_text)
+            
+            # Create bar chart with HOURS on y-axis (NOT MINUTES)
+            fig_downtime = go.Figure()
+            
+            fig_downtime.add_trace(go.Bar(
+                x=downtime_by_type['downtime_type'],
+                y=downtime_by_type['duration_hours'],
+                text=[format_downtime_context(h) for h in downtime_by_type['duration_hours']],
+                textposition='outside',
+                marker=dict(
+                    color=downtime_by_type['duration_hours'],
+                    colorscale='Reds',
+                    showscale=True,
+                    colorbar=dict(title="Hours")
+                ),
+                hovertext=hover_texts,
+                hoverinfo='text',
+                name='Downtime'
+            ))
+            
+            total_hours = downtime_by_type['duration_hours'].sum()
+            
+            fig_downtime.update_layout(
+                title=f"⏱️ Downtime by Category - Total: {format_downtime_context(total_hours)}",
+                xaxis_title="Downtime Type",
+                yaxis_title="Duration (Hours)",
+                height=450,
+                template="plotly_dark",
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_downtime, use_container_width=True)
+            
+            # Summary metrics in mining-friendly format
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                st.metric("Total Downtime", format_downtime_context(total_hours))
+            with col_b:
+                st.metric("Total Events", f"{downtime_filtered.shape[0]:,}")
+            with col_c:
+                avg_hours = downtime_filtered['duration_hours'].mean()
+                st.metric("Avg Duration", format_downtime_context(avg_hours))
+            with col_d:
+                max_hours = downtime_filtered['duration_hours'].max()
+                st.metric("Longest Event", format_downtime_context(max_hours))
+                
+        else:
+            st.info("No downtime data available")
+
     with col2:
         if not downtime_filtered.empty and 'cost_usd' in downtime_filtered.columns:
+            # Cost analysis
             cost_by_type = downtime_filtered.groupby('downtime_type')['cost_usd'].sum().reset_index()
-            fig = px.bar(cost_by_type, x='downtime_type', y='cost_usd',
-                         title='Downtime Cost Analysis (USD)')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            cost_by_type = cost_by_type.sort_values('cost_usd', ascending=False)
+            
+            # Convert to thousands for cleaner display
+            cost_by_type['cost_thousands'] = cost_by_type['cost_usd'] / 1000
+            total_cost = cost_by_type['cost_usd'].sum()
+            
+            # Calculate percentage of total
+            cost_by_type['cost_percent'] = (cost_by_type['cost_usd'] / total_cost * 100).round(1)
+            
+            # Create custom hover text
+            cost_hover_texts = []
+            for _, row in cost_by_type.iterrows():
+                hover_text = (
+                    f"<b>{row['downtime_type']}</b><br>"
+                    f"• Total Cost: ${row['cost_usd']:,.0f}<br>"
+                    f"• % of Total: {row['cost_percent']}%<br>"
+                    f"• Thousands: ${row['cost_thousands']:,.0f}K"
+                )
+                cost_hover_texts.append(hover_text)
+            
+            fig_cost = go.Figure()
+            
+            fig_cost.add_trace(go.Bar(
+                x=cost_by_type['downtime_type'],
+                y=cost_by_type['cost_thousands'],
+                text=['$' + str(int(x)) + 'K' for x in cost_by_type['cost_thousands']],
+                textposition='outside',
+                marker=dict(
+                    color=cost_by_type['cost_thousands'],
+                    colorscale='RdYlGn_r',
+                    showscale=True,
+                    colorbar=dict(title="Thousands $")
+                ),
+                hovertext=cost_hover_texts,
+                hoverinfo='text',
+                name='Cost'
+            ))
+            
+            fig_cost.update_layout(
+                title=f"💰 Downtime Cost Analysis - Total: ${total_cost/1e6:.1f}M",
+                xaxis_title="Downtime Type",
+                yaxis_title="Cost (Thousands USD)",
+                height=450,
+                template="plotly_dark",
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_cost, use_container_width=True)
+            
+            # Cost efficiency metrics
+            col_e, col_f, col_g = st.columns(3)
+            with col_e:
+                st.metric("Total Cost", f"${total_cost/1e6:.1f}M")
+            with col_f:
+                if total_hours > 0:
+                    avg_cost_per_hour = total_cost / total_hours
+                    st.metric("Avg Cost/Hour", f"${avg_cost_per_hour:,.0f}")
+                else:
+                    st.metric("Avg Cost/Hour", "N/A")
+            with col_g:
+                most_costly = cost_by_type.iloc[0]['downtime_type']
+                st.metric("Most Costly", most_costly)
+        else:
+            st.info("No cost data available")
+    
+    # Shift-based downtime analysis
+    if not downtime_filtered.empty:
+        st.markdown('<div class="section-header">🕒 Shift Impact Analysis</div>', unsafe_allow_html=True)
+        
+        # Add shift information
+        downtime_filtered['hour'] = pd.to_datetime(downtime_filtered['start_time']).dt.hour
+        downtime_filtered['shift'] = downtime_filtered['hour'].apply(
+            lambda x: 'Night' if (x >= 18 or x < 6) else 'Day'
+        )
+        
+        shift_summary = downtime_filtered.groupby('shift').agg({
+            'duration_hours': 'sum',
+            'cost_usd': 'sum',
+            'duration_minutes': 'count'
+        }).reset_index()
+        shift_summary.rename(columns={'duration_minutes': 'event_count'}, inplace=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig_shift_hours = px.pie(
+                shift_summary, 
+                values='duration_hours', 
+                names='shift',
+                title="Downtime Hours by Shift",
+                hole=0.4
+            )
+            fig_shift_hours.update_traces(
+                textinfo='label+percent',
+                hovertemplate='<b>%{label}</b><br>Hours: %{value:.0f}<br>Percent: %{percent}<extra></extra>'
+            )
+            st.plotly_chart(fig_shift_hours, use_container_width=True)
+        
+        with col2:
+            fig_shift_cost = px.pie(
+                shift_summary, 
+                values='cost_usd', 
+                names='shift',
+                title="Downtime Cost by Shift",
+                hole=0.4
+            )
+            fig_shift_cost.update_traces(
+                textinfo='label+percent',
+                hovertemplate='<b>%{label}</b><br>Cost: $%{value:,.0f}<br>Percent: %{percent}<extra></extra>'
+            )
+            st.plotly_chart(fig_shift_cost, use_container_width=True)
     
     # Predictive Maintenance Alerts
     st.markdown('<div class="section-header">🔔 Predictive Alerts</div>', unsafe_allow_html=True)
     
-    alerts = [
-        {"equipment": "Excavator EQ-007", "issue": "Engine hours exceed threshold", "severity": "High"},
-        {"equipment": "Haul Truck HT-012", "issue": "Brake system degradation", "severity": "High"},
-        {"equipment": "Crusher CR-003", "issue": "Bearing vibration increasing", "severity": "Medium"},
-    ]
-    
-    for alert in alerts:
-        severity_color = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
-        with st.expander(f"{severity_color[alert['severity']]} {alert['equipment']} - {alert['issue']}"):
-            st.write(f"**Severity:** {alert['severity']}")
-            st.write("**Action Required:** Schedule maintenance within 48 hours")
-            if st.button(f"Create Work Order", key=f"btn_{alert['equipment']}"):
-                st.success(f"Work order created for {alert['equipment']}")
+    # Generate alerts based on downtime patterns
+    if not downtime_filtered.empty:
+        # Find equipment with highest downtime
+        top_downtime_equipment = downtime_filtered.groupby('equipment_id').agg({
+            'duration_hours': 'sum',
+            'duration_minutes': 'count'
+        }).reset_index()
+        top_downtime_equipment.columns = ['equipment_id', 'duration_hours', 'event_count']
+        top_downtime_equipment = top_downtime_equipment.sort_values('duration_hours', ascending=False).head(3)
+        
+        alerts = []
+        for _, eq in top_downtime_equipment.iterrows():
+            eq_id = eq['equipment_id']
+            eq_info = df_equipment[df_equipment['equipment_id'] == eq_id].iloc[0]
+            
+            if eq['duration_hours'] > 100:
+                severity = "High"
+                icon = "🔴"
+            elif eq['duration_hours'] > 50:
+                severity = "Medium"
+                icon = "🟡"
+            else:
+                severity = "Low"
+                icon = "🟢"
+            
+            alerts.append({
+                "equipment": f"{eq_info['equipment_type']} {eq_id}",
+                "issue": f"High downtime: {format_downtime_context(eq['duration_hours'])}",
+                "severity": severity,
+                "icon": icon
+            })
+        
+        # Add some standard alerts
+        standard_alerts = [
+            {"equipment": "Excavator EQ-007", "issue": "Engine hours exceed threshold", "severity": "High", "icon": "🔴"},
+            {"equipment": "Haul Truck HT-012", "issue": "Brake system degradation", "severity": "High", "icon": "🔴"},
+            {"equipment": "Crusher CR-003", "issue": "Bearing vibration increasing", "severity": "Medium", "icon": "🟡"},
+        ]
+        
+        alerts = standard_alerts + alerts
+        
+        for alert in alerts[:5]:  # Show top 5 alerts
+            with st.expander(f"{alert['icon']} {alert['equipment']} - {alert['issue']}"):
+                st.write(f"**Severity:** {alert['severity']}")
+                st.write("**Action Required:** Schedule maintenance within 48 hours")
+                if st.button(f"Create Work Order", key=f"btn_{alert['equipment']}"):
+                    st.success(f"Work order created for {alert['equipment']}")
     
     # Export Section
     st.markdown('<div class="section-header">📥 Data Export</div>', unsafe_allow_html=True)
@@ -441,24 +866,93 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        # FIXED: Actually generate PDF report
         if st.button("📄 Generate PDF Report", use_container_width=True):
-            st.success("Report generation started!")
+            with st.spinner("Generating PDF report..."):
+                try:
+                    pdf_data = generate_pdf_report(
+                        prod_filtered, 
+                        equip_filtered, 
+                        downtime_filtered, 
+                        oee, 
+                        utilization, 
+                        total_production, 
+                        cost_per_ton, 
+                        date_range
+                    )
+                    
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_data,
+                        file_name=f"mining_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                    st.success("PDF Report generated successfully!")
+                except Exception as e:
+                    st.error(f"Error generating PDF: {str(e)}")
     
     with col2:
-        # Excel Export
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            prod_filtered.to_excel(writer, sheet_name='Production', index=False)
-            equip_filtered.to_excel(writer, sheet_name='Equipment', index=False)
-            downtime_filtered.to_excel(writer, sheet_name='Downtime', index=False)
-        
-        st.download_button(
-            label="📊 Download Excel",
-            data=output.getvalue(),
-            file_name="mining_dashboard_export.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        # Excel Export - Fixed with better formatting
+        if st.button("📊 Generate Excel Report", use_container_width=True):
+            with st.spinner("Generating Excel report..."):
+                try:
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Production data
+                        prod_filtered.to_excel(writer, sheet_name='Production', index=False)
+                        
+                        # Equipment data
+                        equip_filtered.to_excel(writer, sheet_name='Equipment', index=False)
+                        
+                        # Downtime data with hours conversion
+                        downtime_export = downtime_filtered.copy()
+                        if 'duration_hours' not in downtime_export.columns:
+                            downtime_export['duration_hours'] = downtime_export['duration_minutes'] / 60
+                        downtime_export.to_excel(writer, sheet_name='Downtime', index=False)
+                        
+                        # Summary sheet
+                        summary_data = {
+                            'Metric': [
+                                'OEE (%)', 
+                                'Total Production (Tons)', 
+                                'Equipment Utilization (%)', 
+                                'Cost per Ton ($)',
+                                'Total Downtime',
+                                'Report Generated'
+                            ],
+                            'Value': [
+                                f"{oee}",
+                                f"{total_production:,.0f}",
+                                f"{utilization}",
+                                f"{cost_per_ton}",
+                                format_downtime_context(downtime_filtered['duration_hours'].sum()),
+                                datetime.now().strftime('%Y-%m-%d %H:%M')
+                            ]
+                        }
+                        pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary', index=False)
+                        
+                        # Downtime by type sheet
+                        if not downtime_filtered.empty:
+                            downtime_summary = downtime_filtered.groupby('downtime_type').agg({
+                                'duration_hours': 'sum',
+                                'cost_usd': 'sum',
+                                'duration_minutes': 'count'
+                            }).reset_index()
+                            downtime_summary.rename(columns={'duration_minutes': 'event_count'}, inplace=True)
+                            downtime_summary['duration_formatted'] = downtime_summary['duration_hours'].apply(format_downtime_context)
+                            downtime_summary.to_excel(writer, sheet_name='Downtime_Summary', index=False)
+                    
+                    st.download_button(
+                        label="📥 Download Excel Report",
+                        data=output.getvalue(),
+                        file_name=f"mining_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                    st.success("Excel Report generated successfully!")
+                except Exception as e:
+                    st.error(f"Error generating Excel: {str(e)}")
     
     with col3:
         if st.button("🔄 Refresh Dashboard", use_container_width=True):
@@ -467,11 +961,14 @@ def main():
     
     # Footer
     st.markdown("---")
+    total_downtime_hours = downtime_filtered['duration_hours'].sum() if not downtime_filtered.empty else 0
+    
     st.markdown(f"""
     <div style="text-align: center; color: #718096; font-size: 0.9rem;">
         <p><strong>{COMPANY_NAME} - Production Excellence System</strong></p>
         <p>Version {APP_VERSION} | Data Period: {date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}</p>
         <p>Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p>Total Downtime: {format_downtime_context(total_downtime_hours)}</p>
     </div>
     """, unsafe_allow_html=True)
 
